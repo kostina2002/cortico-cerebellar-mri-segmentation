@@ -9,7 +9,7 @@ from sklearn.model_selection import train_test_split
 from config import cfg
 
 class AtriaSegDataset(Dataset):
-    def __init__(self, base_path, split='train', target_size=128, max_slices=32,
+    def __init__(self, base_path, split='train', target_size=128, max_slices=96,
                  slice_step=1, random_state=42):
         self.base_path = Path(base_path)
         self.target_size = target_size
@@ -69,15 +69,20 @@ class AtriaSegDataset(Dataset):
             k_slice = F.interpolate(k_slice, size=(self.target_size, self.target_size),
                                     mode='nearest').squeeze(0)
 
-            if self.augment and cfg.USE_AUGMENTATION and random.random() < cfg.AUGMENTATION_PROB:
+
+            # Apply augmentations only during training and with configured probability
+            if self.augment and random.random() < cfg.AUGMENTATION_PROB:
                 # Add Gaussian noise
                 noise = torch.randn_like(m_slice) * cfg.NOISE_STD
                 m_slice = m_slice + noise
+                
                 # Random spatial shift
                 shift_x = random.randint(-cfg.SHIFT_MAX, cfg.SHIFT_MAX)
                 shift_y = random.randint(-cfg.SHIFT_MAX, cfg.SHIFT_MAX)
                 m_slice = torch.roll(m_slice, shifts=(shift_x, shift_y), dims=(1,2))
                 k_slice = torch.roll(k_slice, shifts=(shift_x, shift_y), dims=(1,2))
+                
+                # Zero-pad out-of-bound regions
                 if shift_x > 0:
                     m_slice[:, :shift_x, :] = 0
                     k_slice[:, :shift_x, :] = 0
