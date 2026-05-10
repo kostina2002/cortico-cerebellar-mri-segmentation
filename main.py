@@ -12,13 +12,6 @@ from models.cortico_cerebellar_unet import CorticoCerebellarUNet
 from utils.visualize import plot_aggregated_curves, visualize_predictions_overview
 
 def get_cerebellar_lambda(epoch_1based: int, cfg) -> float:
-    """
-    Рассчитывает вес λ для церебеллярной потери по схеме из статьи:
-    - Эпохи 1-3: λ = 0.0
-    - Эпохи 4-10: линейный рост от 0.0 до CEREB_LOSS_MAX_WEIGHT
-    - Эпохи 11+: λ = CEREB_LOSS_MAX_WEIGHT
-    epoch_1based: номер эпохи, начиная с 1 (не 0!)
-    """
     if epoch_1based <= cfg.CEREB_LOSS_WARMUP_EPOCHS:
         return 0.0
     elif epoch_1based <= cfg.CEREB_LOSS_WARMUP_EPOCHS + cfg.CEREB_LOSS_RAMPUP_EPOCHS:
@@ -38,10 +31,13 @@ def main(run_multiple_seeds=True, device=None):
     if device is None:
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
     print("="*60)
     print("CORTICO-CEREBELLAR SEGMENTATION (with slice subsampling)")
     print("="*60)
-
+    
     if run_multiple_seeds:
         SEEDS = [42, 123, 456, 789, 101112]
     else:
@@ -74,16 +70,22 @@ def main(run_multiple_seeds=True, device=None):
             random_state=seed
         )
 
+        g = torch.Generator()
+        g.manual_seed(seed)
+
         train_loader = DataLoader(train_ds, batch_size=cfg.BATCH_SIZE,
-                                  shuffle=True, num_workers=cfg.NUM_WORKERS)
+                                  shuffle=True,generator=g,num_workers=cfg.NUM_WORKERS,
+                                  pin_memory=True)
         val_loader = DataLoader(val_ds, batch_size=cfg.BATCH_SIZE,
-                                shuffle=False, num_workers=cfg.NUM_WORKERS)
+                                shuffle=False, num_workers=cfg.NUM_WORKERS,
+                                pin_memory=True)
 
         for fb in feedback_types:
             print("\n" + "-"*40)
             print(f"Training with feedback = {fb}, seed = {seed}")
             print("-"*40)
-            hist, model = train_model(cfg, fb, train_loader, val_loader, device, seed)
+            
+            hist, model = train_model(cfg, fb, train_loader, val_loader, device, seed, lambda_fn=get_cerebellar_lambda)
             all_histories[fb].append(hist)
             if seed == SEEDS[-1]:
                 last_models[fb] = model
